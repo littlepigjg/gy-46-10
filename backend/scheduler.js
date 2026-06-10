@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import getDb from './db.js';
 import { takeScreenshot } from './screenshot.js';
+import { applyAutoTags } from './taggingEngine.js';
 
 function shouldRunNow(frequency, lastRun) {
   if (!lastRun) return true;
@@ -31,8 +32,24 @@ async function runAllDueTasks() {
     if (shouldRunNow(urlRecord.frequency, urlRecord.last_screenshot_at)) {
       console.log(`[调度器] 执行截图: ${urlRecord.url}`);
       try {
-        await takeScreenshot(urlRecord);
+        const result = await takeScreenshot(urlRecord);
         console.log(`[调度器] 截图完成: ${urlRecord.url}`);
+
+        const db = await getDb();
+        const shot = db.prepare(`
+          SELECT s.id, s.created_at, s.page_title, s.meta_description, s.meta_keywords, u.url
+          FROM screenshots s
+          JOIN urls u ON s.url_id = u.id
+          WHERE s.id = ?
+        `).get(result.id);
+
+        if (shot) {
+          await applyAutoTags(
+            shot.id, shot.url, shot.created_at,
+            shot.page_title, shot.meta_description, shot.meta_keywords
+          );
+          console.log(`[调度器] 自动标签完成: ${urlRecord.url}`);
+        }
       } catch (err) {
         console.error(`[调度器] 截图失败 [${urlRecord.url}]:`, err.message);
       }
@@ -58,5 +75,21 @@ export async function triggerScreenshotNow(urlId) {
   if (!urlRecord) {
     throw new Error('URL不存在');
   }
-  return await takeScreenshot(urlRecord);
+  const result = await takeScreenshot(urlRecord);
+
+  const shot = db.prepare(`
+    SELECT s.id, s.created_at, s.page_title, s.meta_description, s.meta_keywords, u.url
+    FROM screenshots s
+    JOIN urls u ON s.url_id = u.id
+    WHERE s.id = ?
+  `).get(result.id);
+
+  if (shot) {
+    await applyAutoTags(
+      shot.id, shot.url, shot.created_at,
+      shot.page_title, shot.meta_description, shot.meta_keywords
+    );
+  }
+
+  return result;
 }

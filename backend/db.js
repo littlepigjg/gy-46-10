@@ -46,7 +46,8 @@ function wrapStatement(stmt, db) {
 async function initDb() {
   const SQL = await initSqlJs({
     locateFile: (file) => {
-      const modPath = path.dirname(new URL(import.meta.resolve('sql.js')).pathname.replace(/^\/([A-Z]:)/, '$1'));
+      const modUrl = new URL(import.meta.resolve('sql.js'));
+      const modPath = path.dirname(decodeURIComponent(modUrl.pathname.replace(/^\/([A-Z]:)/, '$1')));
       return path.join(modPath, file);
     }
   });
@@ -77,12 +78,85 @@ async function initDb() {
       file_name TEXT NOT NULL,
       width INTEGER,
       height INTEGER,
+      page_title TEXT,
+      meta_description TEXT,
+      meta_keywords TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (url_id) REFERENCES urls(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_screenshots_url_id ON screenshots(url_id);
     CREATE INDEX IF NOT EXISTS idx_screenshots_created_at ON screenshots(created_at);
+
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      color TEXT DEFAULT '#3B82F6',
+      description TEXT,
+      parent_id INTEGER,
+      usage_count INTEGER DEFAULT 0,
+      is_auto INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (parent_id) REFERENCES tags(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tags_parent_id ON tags(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_tags_usage_count ON tags(usage_count DESC);
+
+    CREATE TABLE IF NOT EXISTS tag_synonyms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tag_id INTEGER NOT NULL,
+      synonym TEXT NOT NULL UNIQUE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tag_synonyms_tag_id ON tag_synonyms(tag_id);
+
+    CREATE TABLE IF NOT EXISTS screenshot_tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      screenshot_id INTEGER NOT NULL,
+      tag_id INTEGER NOT NULL,
+      confidence REAL DEFAULT 1.0,
+      is_manual INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (screenshot_id) REFERENCES screenshots(id) ON DELETE CASCADE,
+      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+      UNIQUE(screenshot_id, tag_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_screenshot_tags_screenshot_id ON screenshot_tags(screenshot_id);
+    CREATE INDEX IF NOT EXISTS idx_screenshot_tags_tag_id ON screenshot_tags(tag_id);
+    CREATE INDEX IF NOT EXISTS idx_screenshot_tags_is_manual ON screenshot_tags(is_manual);
+
+    CREATE TABLE IF NOT EXISTS tagging_feedback (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      screenshot_id INTEGER NOT NULL,
+      tag_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      features TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (screenshot_id) REFERENCES screenshots(id) ON DELETE CASCADE,
+      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tagging_feedback_tag_id ON tagging_feedback(tag_id);
+    CREATE INDEX IF NOT EXISTS idx_tagging_feedback_action ON tagging_feedback(action);
+
+    CREATE TABLE IF NOT EXISTS tag_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tag_id INTEGER NOT NULL,
+      rule_type TEXT NOT NULL,
+      rule_pattern TEXT NOT NULL,
+      weight REAL DEFAULT 1.0,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tag_rules_tag_id ON tag_rules(tag_id);
+    CREATE INDEX IF NOT EXISTS idx_tag_rules_type ON tag_rules(rule_type);
   `);
 
   const wrappedDb = {

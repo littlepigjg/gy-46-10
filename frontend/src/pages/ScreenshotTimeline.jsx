@@ -3,6 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { getUrl, getScreenshots, deleteScreenshot } from '../api.js'
 import ImageCompare from '../components/ImageCompare.jsx'
+import ScreenshotTagManager from '../components/ScreenshotTagManager.jsx'
+import TagBadge from '../components/TagBadge.jsx'
+import { getScreenshotTags } from '../api.js'
 
 function getScreenshotUrl(filePath) {
   const idx = filePath.indexOf('screenshots')
@@ -19,6 +22,8 @@ export default function ScreenshotTimeline() {
   const [compareSelection, setCompareSelection] = useState([])
   const [showCompare, setShowCompare] = useState(false)
   const [previewImage, setPreviewImage] = useState(null)
+  const [selectedShot, setSelectedShot] = useState(null)
+  const [shotTags, setShotTags] = useState({})
 
   const firstCompareId = compareSelection[0] || null
   const secondCompareId = compareSelection[1] || null
@@ -28,6 +33,15 @@ export default function ScreenshotTimeline() {
       const [urlRes, shotsRes] = await Promise.all([getUrl(id), getScreenshots(id)])
       setUrlInfo(urlRes.data)
       setScreenshots(shotsRes.data)
+
+      const tagsMap = {}
+      for (const shot of shotsRes.data) {
+        try {
+          const tagsRes = await getScreenshotTags(shot.id)
+          tagsMap[shot.id] = tagsRes.data
+        } catch (e) {}
+      }
+      setShotTags(tagsMap)
     } catch (err) {
       alert('加载失败: ' + err.message)
     }
@@ -46,10 +60,17 @@ export default function ScreenshotTimeline() {
     try {
       await deleteScreenshot(shot.id)
       setCompareSelection(prev => prev.filter(id => id !== shot.id))
+      if (selectedShot?.id === shot.id) {
+        setSelectedShot(null)
+      }
       loadData()
     } catch (err) {
       alert('删除失败: ' + err.message)
     }
+  }
+
+  const handleTagsChange = (shotId, newTags) => {
+    setShotTags(prev => ({ ...prev, [shotId]: newTags }))
   }
 
   const handleSelectCompare = (shotId) => {
@@ -160,6 +181,15 @@ export default function ScreenshotTimeline() {
         </div>
       </div>
 
+      {selectedShot && (
+        <div className="mb-6">
+          <ScreenshotTagManager
+            screenshotId={selectedShot.id}
+            onTagsChange={(tags) => handleTagsChange(selectedShot.id, tags)}
+          />
+        </div>
+      )}
+
       {screenshots.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center text-gray-500">
           暂无截图，等待首次执行或返回列表点击"立即截图"
@@ -181,24 +211,32 @@ export default function ScreenshotTimeline() {
 
                   return (
                     <div
-                      key={shot.id}
-                      className={`bg-white rounded-xl shadow-sm border-2 overflow-hidden transition-all ${
-                        isFirst || isSecond
-                          ? 'border-blue-500 ring-2 ring-blue-200'
-                          : 'border-gray-200 hover:shadow-md'
-                      } ${compareMode ? 'cursor-pointer' : ''}`}
-                      onClick={() => compareMode && handleSelectCompare(shot.id)}
-                    >
-                      <div
-                        className="relative bg-gray-100 overflow-hidden"
-                        style={{ aspectRatio: '16/9' }}
-                        onClick={(e) => {
-                          if (!compareMode) {
-                            e.stopPropagation()
-                            setPreviewImage({ src: imgUrl, time: shot.created_at })
+                        key={shot.id}
+                        className={`bg-white rounded-xl shadow-sm border-2 overflow-hidden transition-all ${
+                          selectedShot?.id === shot.id
+                            ? 'border-blue-500 ring-2 ring-blue-200'
+                            : isFirst || isSecond
+                            ? 'border-blue-500 ring-2 ring-blue-200'
+                            : 'border-gray-200 hover:shadow-md'
+                        } ${compareMode ? 'cursor-pointer' : 'cursor-pointer'}`}
+                        onClick={() => {
+                          if (compareMode) {
+                            handleSelectCompare(shot.id)
+                          } else {
+                            setSelectedShot(selectedShot?.id === shot.id ? null : shot)
                           }
                         }}
                       >
+                        <div
+                          className="relative bg-gray-100 overflow-hidden"
+                          style={{ aspectRatio: '16/9' }}
+                          onClick={(e) => {
+                            if (!compareMode) {
+                              e.stopPropagation()
+                              setPreviewImage({ src: imgUrl, time: shot.created_at })
+                            }
+                          }}
+                        >
                         <img
                           src={imgUrl}
                           alt={`screenshot-${shot.id}`}
@@ -215,6 +253,16 @@ export default function ScreenshotTimeline() {
                         <div className="text-sm text-gray-700 font-medium">
                           {dayjs(shot.created_at).format('HH:mm:ss')}
                         </div>
+                        {shotTags[shot.id]?.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {shotTags[shot.id].slice(0, 3).map(tag => (
+                              <TagBadge key={tag.id} tag={tag} size="sm" />
+                            ))}
+                            {shotTags[shot.id].length > 3 && (
+                              <span className="text-xs text-gray-400">+{shotTags[shot.id].length - 3}</span>
+                            )}
+                          </div>
+                        )}
                         {!compareMode && (
                           <div className="mt-2 flex gap-2">
                             <button

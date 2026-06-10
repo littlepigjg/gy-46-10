@@ -55,12 +55,22 @@ export async function takeScreenshot(urlRecord) {
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
     await page.screenshot({ path: filePath, fullPage: true });
 
+    const pageTitle = await page.title().catch(() => null);
+    const metaDescription = await page.evaluate(() => {
+      const meta = document.querySelector('meta[name="description"]');
+      return meta ? meta.getAttribute('content') : null;
+    }).catch(() => null);
+    const metaKeywords = await page.evaluate(() => {
+      const meta = document.querySelector('meta[name="keywords"]');
+      return meta ? meta.getAttribute('content') : null;
+    }).catch(() => null);
+
     const db = await getDb();
     const insertStmt = db.prepare(`
-      INSERT INTO screenshots (url_id, file_path, file_name, width, height)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO screenshots (url_id, file_path, file_name, width, height, page_title, meta_description, meta_keywords)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const result = insertStmt.run(id, filePath, fileName, 1920, 1080);
+    const result = insertStmt.run(id, filePath, fileName, 1920, 1080, pageTitle, metaDescription, metaKeywords);
 
     const updateStmt = db.prepare(`
       UPDATE urls SET last_screenshot_at = CURRENT_TIMESTAMP WHERE id = ?
